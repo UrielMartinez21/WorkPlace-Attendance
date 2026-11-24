@@ -164,6 +164,9 @@ const ATTENDANCE = {
         holiday: "#E5E7EB",
         holidayText: "#374151",
 
+        exempt: "#CCFBF1",
+        exemptText: "#115E59",
+
         monthHeader: "#FFE599",
 
         header: "#17365D"
@@ -205,7 +208,7 @@ function setupAttendanceTracker() {
     // Forzar formato texto en cada ejecución para
     // evitar que Sheets convierta la fecha (B2) o
     // la hora (B5) a otro tipo de dato.
-    config.getRange("B2:B6")
+    config.getRange("B2:B7")
         .setNumberFormat("@");
 
     if (config.getLastRow() === 0) {
@@ -237,6 +240,14 @@ function setupAttendanceTracker() {
     if (!config.getRange("A6").getValue()) {
         config.getRange("A6")
             .setValue("Report Emails");
+    }
+
+    // Empleados exentos de reportar asistencia (opcional).
+    // Nombres como en Employees, separados por coma o punto y
+    // coma. Vacio = nadie esta exento.
+    if (!config.getRange("A7").getValue()) {
+        config.getRange("A7")
+            .setValue("Exempt Employees");
     }
 
     // EMPLOYEES
@@ -1044,6 +1055,11 @@ function runAttendanceInternal_(mode) {
         config.getRange("B6").getDisplayValue()
     );
 
+    // Empleados exentos (Config!B7), por nombre normalizado.
+    const exemptNames = parseExemptNames_(
+        config.getRange("B7").getDisplayValue()
+    );
+
     // Validate cutoff.
     const cutoff = getCutoffTime_();
 
@@ -1334,6 +1350,10 @@ function runAttendanceInternal_(mode) {
     let unregistered = 0;
     let vacation = 0;
     let holiday = 0;
+    let exempt = 0;
+
+    // Nombres exentos que si encontraron a un empleado activo.
+    const exemptMatched = new Set();
 
     // Registered employees.
     for (const [userId, employee] of roster) {
@@ -1361,10 +1381,24 @@ function runAttendanceInternal_(mode) {
             messageId = checkIn.messageId;
         }
 
+        const exemptKey = normalizeText_(employee.name);
+        const isExempt = exemptNames.has(exemptKey);
+
+        if (isExempt) {
+            exemptMatched.add(exemptKey);
+        }
+
+        // Exento de reportar asistencia (Config!B7): no se evalua
+        // y tiene prioridad sobre festivos y vacaciones, aunque
+        // escriba su entrada (se conserva la hora de referencia).
+        if (isExempt) {
+            status = "EXEMPT";
+            exempt++;
+
         // Festivo del pais del empleado: no es falta, aunque
         // escriba su entrada (se conserva la hora de referencia).
         // Tiene prioridad sobre las vacaciones.
-        if (holidayName) {
+        } else if (holidayName) {
             status = "HOLIDAY";
             holiday++;
 
@@ -1415,6 +1449,15 @@ function runAttendanceInternal_(mode) {
             messageId
         ]);
     }
+
+    exemptNames.forEach((original, key) => {
+        if (!exemptMatched.has(key)) {
+            console.warn(
+                "Config!B7: no active employee named \"" +
+                original + "\" in Employees."
+            );
+        }
+    });
 
     // Unregistered employees.
     for (const [userId, checkIn] of checkIns) {
@@ -1514,18 +1557,6 @@ function runAttendanceInternal_(mode) {
         Array.from(holidayInfo.values())
     );
 
-    // Aviso al grupo de Chat (WhatsApp y vacaciones): solo en la
-    // ejecucion diaria, para que reprocesar una fecha pasada no
-    // publique nada.
-    if (usingToday) {
-        postDailyNoticeSafely_(
-            vacationSheet,
-            ss.getSheetByName(ATTENDANCE.sheets.whatsapp),
-            spaceId,
-            date
-        );
-    }
-
     // El dashboard no debe impedir que la asistencia ya
     // guardada se considere completada.
     refreshDashboardSafely_();
@@ -1540,6 +1571,7 @@ function runAttendanceInternal_(mode) {
     console.log("Late: " + late);
     console.log("On vacation: " + vacation);
     console.log("Holiday: " + holiday);
+    console.log("Exempt: " + exempt);
     console.log("No check-in: " + noCheckIn);
     console.log("Not on roster: " + unregistered);
     console.log("Rows written: " + results.length);
@@ -1608,7 +1640,11 @@ function applyAttendanceFormatting() {
         let background = "#FFFFFF";
         let fontColor = "#202124";
 
-        if (status === "HOLIDAY") {
+        if (status === "EXEMPT") {
+            background = ATTENDANCE.colors.exempt;
+            fontColor = ATTENDANCE.colors.exemptText;
+
+        } else if (status === "HOLIDAY") {
             background = ATTENDANCE.colors.holiday;
             fontColor = ATTENDANCE.colors.holidayText;
             summary.holiday++;
@@ -1936,13 +1972,13 @@ function getApprovedVacationIds_(
 const VACATION_NOTICE_DAYS_AHEAD = 3;
 
 
-// Manual: publica ahora el aviso del dia (WhatsApp y
-// vacaciones) en el espacio de Config!B4. Sirve para autorizar
-// el permiso de publicar en Chat y para probar el mensaje.
+// Publica el aviso de hoy (WhatsApp y vacaciones) en el grupo
+// del webhook. Es independiente de runDailyAttendance: tiene su
+// propio activador. No hace nada en sabado ni domingo. Tambien
+// sirve para autorizar el permiso y probar el mensaje.
 function postDailyNotice() {
     const ss = getAttendanceSpreadsheet_();
 
-    const config = ss.getSheetByName(ATTENDANCE.sheets.config);
     const vacationSheet = ss.getSheetByName(
         ATTENDANCE.sheets.vacations
     );
@@ -1950,19 +1986,11 @@ function postDailyNotice() {
         ATTENDANCE.sheets.whatsapp
     );
 
-    if (!config || !vacationSheet) {
+    if (!vacationSheet) {
         throw new Error(
             "Missing required tabs. " +
             "Run setupAttendanceTracker() first."
         );
-    }
-
-    const spaceId = String(
-        config.getRange("B4").getDisplayValue()
-    ).trim();
-
-    if (!/^spaces\/[^/]+$/.test(spaceId)) {
-        throw new Error("Invalid Config!B4 space ID.");
     }
 
     const today = Utilities.formatDate(
@@ -1971,35 +1999,17 @@ function postDailyNotice() {
         "yyyy-MM-dd"
     );
 
-    postDailyNotice_(
-        vacationSheet,
-        whatsappSheet,
-        spaceId,
-        today
-    );
-}
+    const weekday = new Date(today + "T12:00:00Z").getUTCDay();
 
-
-// Un fallo al publicar no debe invalidar una asistencia
-// que ya quedo guardada.
-function postDailyNoticeSafely_(
-    vacationSheet,
-    whatsappSheet,
-    spaceId,
-    date
-) {
-    try {
-        postDailyNotice_(
-            vacationSheet,
-            whatsappSheet,
-            spaceId,
-            date
+    if (weekday === 0 || weekday === 6) {
+        console.log(
+            "DAILY NOTICE SKIPPED: " + today + " is a " +
+            (weekday === 0 ? "Sunday" : "Saturday") + "."
         );
-    } catch (error) {
-        console.warn(
-            "Daily notice failed: " + error.message
-        );
+        return;
     }
+
+    postDailyNotice_(vacationSheet, whatsappSheet, today);
 }
 
 
@@ -2169,7 +2179,6 @@ function nextWeekday_(date) {
 function postDailyNotice_(
     vacationSheet,
     whatsappSheet,
-    spaceId,
     date
 ) {
     const lastRow = vacationSheet.getLastRow();
@@ -2672,7 +2681,12 @@ function updateMonthlySheet_(ss, date, results, cutoff) {
 
         if (index === undefined) continue;
 
-        if (row[3] === "HOLIDAY") {
+        if (row[3] === "EXEMPT") {
+            values[index][0] = "E";
+            backgrounds[index][0] = colors.exempt;
+            fontColors[index][0] = colors.exemptText;
+
+        } else if (row[3] === "HOLIDAY") {
             values[index][0] = "F";
             backgrounds[index][0] = colors.holiday;
             fontColors[index][0] = colors.holidayText;
@@ -2875,6 +2889,21 @@ function escapeHtml_(value) {
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
+}
+
+
+// Config!B7: nombres separados por coma, punto y coma o salto de
+// linea. Devuelve un Map nombre normalizado -> nombre escrito.
+function parseExemptNames_(value) {
+    const names = new Map();
+
+    String(value)
+        .split(/[,;\n]+/)
+        .map(name => name.trim())
+        .filter(Boolean)
+        .forEach(name => names.set(normalizeText_(name), name));
+
+    return names;
 }
 
 

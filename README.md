@@ -79,7 +79,7 @@ La URL del webhook de Chat **no** se escribe en el código. Se guarda como propi
 9. **Ejecuta `importHolidays`.** Llena la pestaña `Holidays` con los festivos del año en curso y el siguiente. Revísala.
 10. **Configura el aviso de Chat** (sección 15): crea el webhook, guarda `CHAT_WEBHOOK_URL` y ejecuta `postDailyNotice` para autorizar y probar.
 11. **Prueba `runAttendanceForDate`** con una fecha pasada en `Config!B2` y compara con el chat. Después vacía `B2`.
-12. **Crea el activador diario** de `runDailyAttendance` (sección 10).
+12. **Crea los dos activadores diarios**: `runDailyAttendance` y `postDailyNotice` (sección 10).
 
 Si algo falla, abre **Registro de ejecución** para ver el mensaje (sección 11).
 
@@ -94,8 +94,8 @@ Si algo falla, abre **Registro de ejecución** para ver el mensaje (sección 11)
 | `importEmployeesFromChat` | Agrega a `Employees` los miembros humanos del espacio que aún no están, con `Country = MX`. No modifica ni elimina a los existentes. | Al inicio y cada vez que entre alguien nuevo al espacio. |
 | `importHolidays` | Agrega a `Holidays` los festivos de México y Colombia del año en curso y el siguiente. Solo agrega fechas que faltan. | Una vez al inicio y al empezar cada año. |
 | `runAttendanceForDate` | Procesa la fecha escrita en `Config!B2` (obligatoria). Acepta cualquier fecha, fines de semana incluidos. No publica en Chat. | Para corregir o recalcular un día pasado. |
-| `runDailyAttendance` | Procesa siempre el día de hoy e ignora `Config!B2`. No hace nada en sábado ni domingo. Publica el aviso de Chat. | Es la función del activador diario. |
-| `postDailyNotice` | Publica ahora el aviso de hoy en el grupo de Chat. | Para autorizar el permiso y probar el mensaje. |
+| `runDailyAttendance` | Procesa siempre el día de hoy e ignora `Config!B2`. No hace nada en sábado ni domingo. No publica en Chat. | Es la función del activador de asistencia. |
+| `postDailyNotice` | Publica el aviso de hoy en el grupo de Chat. Es independiente de la asistencia. No hace nada en sábado ni domingo. | Es la función del activador del aviso. También sirve para autorizar el permiso y probar el mensaje. |
 | `refreshDashboard` | Reconstruye los datos y fórmulas del dashboard. | Casi nunca: ambas ejecuciones de asistencia ya lo hacen. Los filtros funcionan solos. |
 | `applyAttendanceFormatting` | Vuelve a pintar las filas de `Attendance` según su estado. | Solo si los colores se desordenaron. |
 
@@ -105,7 +105,7 @@ El resto de las funciones terminan en `_` y son internas: no hay que ejecutarlas
 
 ## 6. Qué hace una ejecución de asistencia
 
-`runDailyAttendance` y `runAttendanceForDate` siguen los mismos pasos. Se diferencian en la fecha que procesan y en que solo la diaria publica en Chat.
+`runDailyAttendance` y `runAttendanceForDate` siguen los mismos pasos. Se diferencian en la fecha que procesan. Ninguna publica en Chat: el aviso lo envía `postDailyNotice`.
 
 1. Impide que corran dos ejecuciones a la vez (espera hasta 10 segundos).
 2. Lee `Config`: fecha, frases, espacio, hora límite y correos. Valida todo **antes** de escribir datos.
@@ -139,8 +139,9 @@ El resto de las funciones terminan en `_` y son internas: no hay que ejecutarlas
 | `PRESENT - NOT ON ROSTER` | Registró entrada pero no está en `Employees`. | Azul |
 | `ON VACATION` | Tiene vacaciones aprobadas que cubren la fecha. | Índigo |
 | `HOLIDAY` | La fecha es festivo en el país del empleado. | Gris |
+| `EXEMPT` | El empleado está en `Config!B7` y no debe reportar asistencia. | Verde azulado |
 
-`HOLIDAY` tiene prioridad sobre `ON VACATION`. En ambos casos, si la persona escribió su entrada, se conserva su hora como referencia.
+`EXEMPT` tiene prioridad sobre `HOLIDAY`, y `HOLIDAY` sobre `ON VACATION`. En todos los casos, si la persona escribió su entrada, se conserva su hora como referencia.
 
 ---
 
@@ -155,8 +156,17 @@ El resto de las funciones terminan en `_` y son internas: no hay que ejecutarlas
 | `B4` | Espacio de Chat que se lee. | `spaces/XXXX` |
 | `B5` | Hora límite. | `HH:mm`, sin segundos |
 | `B6` | Correos del reporte, separados por coma o punto y coma. Vacía = no se envía. | Texto |
+| `B7` | Empleados exentos de reportar asistencia (`Exempt Employees`). Vacía = nadie está exento. | Nombres separados por coma, punto y coma o salto de línea |
 
-Las celdas `B2:B6` se fuerzan a formato texto para que Sheets no convierta la fecha ni la hora.
+Las celdas `B2:B7` se fuerzan a formato texto para que Sheets no convierta la fecha ni la hora.
+
+**Empleados exentos (`B7`).** Escribe los nombres tal como aparecen en `Employees!B` (no importan mayúsculas ni acentos), por ejemplo `González Rodríguez Joel; Carrillo Vélez Betzy`. Estas personas quedan con estado `EXEMPT`:
+
+- No cuentan como `NO CHECK-IN` ni como tarde, aunque no escriban nada. Si escriben su entrada, se conserva su hora solo como referencia.
+- `EXEMPT` tiene prioridad sobre `HOLIDAY` y `ON VACATION`.
+- No aparecen en el correo ni en el dashboard, y en la pestaña del mes llevan una `E` verde azulado.
+- Se siguen relacionando por nombre: si cambia el nombre en `Employees`, actualiza también `B7`. Un nombre de `B7` que no coincide con ningún empleado activo deja una advertencia en el registro.
+- Para quitar la exención, borra el nombre de `B7`. Las filas de días ya procesados conservan `EXEMPT` hasta que los reprocesas con `runAttendanceForDate`.
 
 ### `Employees`
 
@@ -199,7 +209,7 @@ Columnas: `NOMBRE` y `FECHA`. Indica quién atiende los mensajes de WhatsApp cad
 `setupAttendanceTracker` crea una por mes del año en curso (por ejemplo `Noviembre 2026`). Si procesas una fecha de otro año, esa pestaña se crea al momento.
 
 - Una fila por empleado (columna A) y una columna por **día hábil** (lunes a viernes), con encabezado `DD/MM/YYYY`.
-- `X` verde: entrada a tiempo. `X` roja: entrada tarde. `V`: vacaciones. `F` gris: festivo. Celda vacía: sin registro.
+- `X` verde: entrada a tiempo. `X` roja: entrada tarde. `V`: vacaciones. `F` gris: festivo. `E` verde azulado: exento. Celda vacía: sin registro.
 - Si procesas un sábado o domingo con `runAttendanceForDate`, no se escribe nada en la pestaña del mes (queda una advertencia en el registro). `Attendance` sí se actualiza.
 - Los empleados nuevos se agregan al final en la siguiente corrida. Quienes no están en `Employees` no aparecen aquí.
 
@@ -216,7 +226,7 @@ Columnas: `NOMBRE` y `FECHA`. Indica quién atiende los mensajes de WhatsApp cad
   - `% puntualidad` = a tiempo / (a tiempo + tarde).
   - "Tarde" usa la hora límite de `Config!B5` vigente en la última ejecución.
   - El país sale de `Employees!D` actual, no el de la fecha.
-  - `PRESENT - NOT ON ROSTER` no se incluye.
+  - `PRESENT - NOT ON ROSTER` y `EXEMPT` no se incluyen.
 
 ---
 
@@ -263,6 +273,7 @@ Limitación: cualquier mensaje que empiece con un saludo cuenta como asistencia,
 |---|---|
 | Una sola vez | `testConnection`, `setupAttendanceTracker`, `importEmployeesFromChat`, `importHolidays` y configurar el webhook (sección 15). |
 | Cada día hábil | `runDailyAttendance`, **después** de la hora límite o al cerrar la jornada. Si corre antes de que todos escriban, los que faltan aparecen como `NO CHECK-IN` y el correo los incluye. Conviene dejarla en un activador. |
+| Cada día hábil, por la mañana | `postDailyNotice`, en su propio activador. Publica el aviso de WhatsApp y vacaciones. |
 | Cuando entren personas nuevas al espacio | `importEmployeesFromChat`. Revisa su `Country`. Después, si hace falta, ejecuta de nuevo la asistencia. |
 | Cuando alguien salga del espacio | Cambiar a mano su columna `Active` a `FALSE` en `Employees`. El script no lo hace solo. |
 | Cada año nuevo | `importHolidays` (también carga el año siguiente) y, opcional, `setupAttendanceTracker` para crear de golpe las 12 pestañas. |
@@ -270,9 +281,16 @@ Limitación: cualquier mensaje que empiece con un saludo cuenta como asistencia,
 
 Re-ejecutar el mismo día es seguro: solo se reemplazan las filas de esa fecha y el resto del historial se conserva. Pero **las ediciones manuales a esas filas, y a la celda del empleado en la pestaña del mes, se sobrescriben**.
 
-### Activador diario
+### Activadores diarios
 
-En Apps Script abre **Activadores** → **Agregar activador** → función `runDailyAttendance`, tipo *Basado en tiempo* → *Temporizador diario*, a una hora posterior al corte. Apps Script lo ejecuta en cualquier momento dentro de la hora elegida. La función no hace nada en fin de semana, y los festivos se resuelven por la pestaña `Holidays` y el país de cada empleado.
+Son dos activadores independientes. En Apps Script abre **Activadores** → **Agregar activador**, elige el tipo *Basado en tiempo* → *Temporizador diario* y crea:
+
+| Función | Hora sugerida |
+|---|---|
+| `runDailyAttendance` | Posterior a la hora límite de entrada. |
+| `postDailyNotice` | La que prefieras para el aviso, por ejemplo temprano por la mañana. No depende de la asistencia. |
+
+Apps Script ejecuta cada activador en cualquier momento dentro de la hora elegida. Ambas funciones no hacen nada en fin de semana. Los festivos de asistencia se resuelven por la pestaña `Holidays` y el país de cada empleado. El aviso de Chat no considera festivos.
 
 ---
 
@@ -334,13 +352,13 @@ Los errores del aviso de Chat están en la sección 15.
 | `v7.js` | Detección flexible de mensajes y reporte de mensajes ignorados. |
 | `v8.js` | Reporte por correo (`Config!B6`). |
 | `v9.js` | Correo con diseño mejorado: resumen, tablas, retraso y botón. |
-| `v10.js` | `runDailyAttendance` (hoy, sin fines de semana) y `runAttendanceForDate` (fecha de `B2`). País por empleado y pestaña `Holidays` con estado `HOLIDAY`. Dashboard. Pestaña `WhatsApp` y aviso diario al grupo de Chat por webhook. |
+| `v10.js` | `runDailyAttendance` (hoy, sin fines de semana) y `runAttendanceForDate` (fecha de `B2`). País por empleado y pestaña `Holidays` con estado `HOLIDAY`. Dashboard. Pestaña `WhatsApp` y aviso diario al grupo de Chat por webhook (`postDailyNotice`, con su propio activador). Empleados exentos en `Config!B7`. |
 
 ---
 
 ## 15. Aviso diario en Google Chat
 
-Al terminar `runDailyAttendance`, el script publica un mensaje en el grupo de asistencia con tres datos:
+La función `postDailyNotice` publica un mensaje en el grupo de asistencia con tres datos:
 
 - Quién atiende los mensajes de WhatsApp hoy.
 - Quién está de vacaciones hoy.
@@ -365,12 +383,13 @@ Es texto plano con el formato básico de Chat: lo que va entre `*asteriscos*` sa
 
 Reglas:
 
-- Solo se publica desde `runDailyAttendance`. `runAttendanceForDate` no publica, así que reprocesar un día pasado no manda nada al grupo.
+- Es independiente de la asistencia: `runDailyAttendance` y `runAttendanceForDate` no publican nada. Tiene su propio activador.
+- No hace nada en sábado ni domingo.
 - Si no hay asignación de WhatsApp ni vacaciones, no se publica nada.
 - Solo cuentan las vacaciones `APPROVED` de la pestaña `Vacations`.
 - Una vacación se anuncia una vez. Si empieza en fin de semana, se anuncia como si empezara el lunes. No considera la pestaña `Holidays` al contar los 3 días.
 - El mensaje no empieza con un saludo, para que `runAttendance` no lo confunda con una entrada.
-- Si el envío falla, solo se deja una advertencia en el registro. La asistencia ya guardada no se afecta.
+- Si el envío falla, la ejecución termina con el error en el registro.
 - Para cambiar la anticipación, edita `VACATION_NOTICE_DAYS_AHEAD`.
 
 ### Pestaña `WhatsApp`
@@ -394,7 +413,7 @@ Google Chat no permite publicar con la API desde una cuenta de usuario sin crear
    - Valor: la URL completa del webhook.
 3. Copia `v10.js` y `appsscript.json` al proyecto. El manifiesto debe incluir el scope `https://www.googleapis.com/auth/script.external_request`.
 4. Ejecuta `postDailyNotice` a mano y acepta el permiso nuevo. Esa función publica el aviso de hoy y sirve de prueba.
-5. El activador de `runDailyAttendance` no necesita cambios.
+5. Crea un activador diario para `postDailyNotice` (sección 10).
 
 Notas de seguridad:
 
@@ -409,4 +428,4 @@ Notas de seguridad:
 |---|---|
 | `Missing script property CHAT_WEBHOOK_URL` | Falta la propiedad del script. Agrégala (ver arriba). |
 | `Chat webhook returned HTTP 4xx` | La URL es incorrecta o el webhook fue borrado. Crea uno nuevo y actualiza la propiedad. |
-| `Daily notice failed: ...` (advertencia) | El aviso falló, pero la asistencia se guardó. Revisa el mensaje que sigue. |
+| `Missing required tabs...` | Falta la pestaña `Vacations`. Ejecuta `setupAttendanceTracker`. |
