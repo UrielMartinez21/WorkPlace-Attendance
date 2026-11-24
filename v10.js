@@ -312,6 +312,20 @@ function setupAttendanceTracker() {
         ]]);
     }
 
+    // Fechas de inicio y fin: la validacion de tipo fecha muestra
+    // el selector de calendario al hacer doble clic. Se fuerza el
+    // formato YYYY-MM-DD (el mismo que usa el script). Solo
+    // advierte, para no bloquear fechas pegadas como texto.
+    // Los valores que ya existen no se modifican.
+    vacations.getRange("B2:C1000")
+        .setNumberFormat("yyyy-mm-dd")
+        .setDataValidation(
+            SpreadsheetApp.newDataValidation()
+                .requireDate()
+                .setAllowInvalid(true)
+                .build()
+        );
+
     // Nombre del empleado: lista tomada de Employees
     // (solo advertencia, no bloquea la captura).
     vacations.getRange("A2:A1000").setDataValidation(

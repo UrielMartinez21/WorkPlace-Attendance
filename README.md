@@ -176,7 +176,7 @@ Columnas: `Employee`, `Start Date`, `End Date`, `Status`.
 
 - `Status` es una lista cerrada: `APPROVED`, `PENDING`, `REJECTED`.
 - Solo las filas `APPROVED` cuyo rango incluye la fecha procesada cuentan. Las demás se ignoran y el empleado sigue el flujo normal.
-- Las fechas se escriben `YYYY-MM-DD` (inicio y fin incluidos; para un solo día, la misma fecha en ambas).
+- `Start Date` y `End Date` tienen selector de calendario (doble clic en la celda) y se muestran como `YYYY-MM-DD`. Inicio y fin están incluidos; para un solo día, la misma fecha en ambas. La validación solo advierte: también se leen fechas escritas o pegadas como texto `YYYY-MM-DD`.
 - El empleado se relaciona **por nombre** con `Employees` (sin importar mayúsculas ni acentos). La columna `Employee` tiene lista desplegable con los nombres.
 - Una fila `APPROVED` con fechas inválidas o sin nombre **detiene** la ejecución e indica la fila. Si el nombre no existe en `Employees`, solo se registra una advertencia.
 - Esta pestaña también alimenta el aviso diario de Chat (sección 15).
