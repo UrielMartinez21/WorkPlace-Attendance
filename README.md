@@ -160,6 +160,8 @@ El resto de las funciones terminan en `_` y son internas: no hay que ejecutarlas
 
 Las celdas `B2:B7` se fuerzan a formato texto para que Sheets no convierta la fecha ni la hora.
 
+**Lista de áreas (`C2:C50`).** La columna `C` (encabezado `Areas`) guarda las áreas disponibles, una por celda. Alimenta la lista desplegable de `Employees!E`. Escríbelas a mano; el script solo crea el encabezado.
+
 **Empleados exentos (`B7`).** Escribe los nombres tal como aparecen en `Employees!B` (no importan mayúsculas ni acentos), por ejemplo `González Rodríguez Joel; Carrillo Vélez Betzy`. Estas personas quedan con estado `EXEMPT`:
 
 - No cuentan como `NO CHECK-IN` ni como tarde, aunque no escriban nada. Si escriben su entrada, se conserva su hora solo como referencia.
@@ -170,10 +172,11 @@ Las celdas `B2:B7` se fuerzan a formato texto para que Sheets no convierta la fe
 
 ### `Employees`
 
-Columnas: `Google Chat User ID`, `Employee Name`, `Active`, `Country`.
+Columnas: `Google Chat User ID`, `Employee Name`, `Active`, `Country`, `Area`.
 
 - Los valores que cuentan como activo son vacío, `TRUE`, `YES`, `SI`, `SÍ` y `1`.
 - `Country` es `MX` o `CO` (lista desplegable). Vacío equivale a `MX`. Define qué festivos aplican al empleado.
+- `Area` es una lista desplegable con las áreas de `Config!C2:C50`. Solo se usa en el correo. Es opcional y la validación solo advierte. `importEmployeesFromChat` la deja vacía en los empleados nuevos.
 - No puede haber IDs repetidos: si los hay, la ejecución se detiene.
 
 ### `Attendance`
@@ -257,9 +260,12 @@ Limitación: cualquier mensaje que empiece con un saludo cuenta como asistencia,
 
 - Se envía al final de cada ejecución de asistencia (diaria o por fecha) a los correos de `Config!B6`.
 - Solo se envía si hay al menos una persona tarde o sin registro. Si todos llegaron a tiempo, no se manda nada.
-- Contiene: fecha, hora límite, totales (a tiempo, tarde, vacaciones, festivo y sin registro), tabla de llegadas tarde con hora y retraso, lista de quienes no registraron entrada y un botón para abrir la hoja.
+- Contiene: fecha, hora límite, totales (a tiempo, tarde, vacaciones, festivo y sin registro), tabla de llegadas tarde con empleado, área, país, hora y retraso, tabla de quienes no registraron entrada con empleado, área y país, tabla de quienes están de vacaciones con empleado, área y país (solo si hay alguien), y un botón para abrir la hoja.
+- El área sale de `Employees!E` y el país de `Employees!D`. Ambos aparecen en las tablas de llegadas tarde, sin registro y vacaciones, como etiquetas de color. Quien no tenga área asignada aparece como "Sin área" en gris. La tabla sigue ordenada por hora de llegada, sin agrupar por área.
+- Colores: cada área toma un color según su posición en `Config!C2:C50` (hay 6 colores y la séptima área repite el primero), así que conviene no reordenar esa lista. El país tiene color fijo (México azul cielo, Colombia amarillo). Los colores se editan en `ATTENDANCE.colors` (`areaPalette`, `countryColors`, `neutralBadge`).
 - Si hay festivo, el correo muestra una tarjeta de "Festivo" y el nombre del festivo por país.
-- Las personas de vacaciones o con festivo no aparecen como "sin registro".
+- Las personas de vacaciones o con festivo no aparecen como "sin registro". Las de vacaciones se listan aparte, en la sección "De vacaciones", que solo aparece si hay alguien. No se muestran sus fechas de regreso.
+- La sección de vacaciones no hace que se envíe el correo: sigue enviándose solo si hay alguien tarde o sin registro.
 - **Se envía en cada ejecución.** Si corres el mismo día dos veces, llegan dos correos.
 - Un correo mal escrito en `B6` detiene la ejecución antes de escribir datos.
 - La primera vez que corra una ejecución con correos configurados, Google pedirá permiso para enviar correo.
@@ -352,7 +358,7 @@ Los errores del aviso de Chat están en la sección 15.
 | `v7.js` | Detección flexible de mensajes y reporte de mensajes ignorados. |
 | `v8.js` | Reporte por correo (`Config!B6`). |
 | `v9.js` | Correo con diseño mejorado: resumen, tablas, retraso y botón. |
-| `v10.js` | `runDailyAttendance` (hoy, sin fines de semana) y `runAttendanceForDate` (fecha de `B2`). País por empleado y pestaña `Holidays` con estado `HOLIDAY`. Dashboard. Pestaña `WhatsApp` y aviso diario al grupo de Chat por webhook (`postDailyNotice`, con su propio activador). Empleados exentos en `Config!B7`. |
+| `v10.js` | `runDailyAttendance` (hoy, sin fines de semana) y `runAttendanceForDate` (fecha de `B2`). País por empleado y pestaña `Holidays` con estado `HOLIDAY`. Dashboard. Pestaña `WhatsApp` y aviso diario al grupo de Chat por webhook (`postDailyNotice`, con su propio activador). Empleados exentos en `Config!B7`. Columna `Area` en `Employees` (lista en `Config!C`) y área en la tablas de llegadas tarde, sin registro y vacaciones del correo (con país y etiquetas de color), que ahora incluye la sección "De vacaciones". |
 
 ---
 

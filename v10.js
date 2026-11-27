@@ -167,6 +167,24 @@ const ATTENDANCE = {
         exempt: "#CCFBF1",
         exemptText: "#115E59",
 
+        // Etiquetas de color del correo. Cada area toma un color de
+        // areaPalette segun su posicion en Config!C2:C50 (la 7a
+        // area repite el primero). El pais usa countryColors.
+        // Sin area o pais desconocido: gris.
+        areaPalette: [
+            { background: "#EDE9FE", text: "#5B21B6" },
+            { background: "#FCE7F3", text: "#9D174D" },
+            { background: "#FFEDD5", text: "#9A3412" },
+            { background: "#CCFBF1", text: "#115E59" },
+            { background: "#ECFCCB", text: "#3F6212" },
+            { background: "#FAE8FF", text: "#86198F" }
+        ],
+        countryColors: {
+            MX: { background: "#E0F2FE", text: "#075985" },
+            CO: { background: "#FEF9C3", text: "#854D0E" }
+        },
+        neutralBadge: { background: "#F3F4F6", text: "#6B7280" },
+
         monthHeader: "#FFE599",
 
         header: "#17365D"
@@ -250,6 +268,13 @@ function setupAttendanceTracker() {
             .setValue("Exempt Employees");
     }
 
+    // Lista de areas (Config!C2:C50). Alimenta la lista
+    // desplegable de Employees!E. Se escriben a mano, una por
+    // celda. Solo se agrega el encabezado.
+    if (!config.getRange("C1").getValue()) {
+        config.getRange("C1").setValue("Areas");
+    }
+
     // EMPLOYEES
     const employees = getOrCreateSheet_(
         ss,
@@ -260,13 +285,39 @@ function setupAttendanceTracker() {
         employees.getRange("A:A")
             .setNumberFormat("@");
 
-        employees.getRange("A1:D1").setValues([[
+        employees.getRange("A1:E1").setValues([[
             "Google Chat User ID",
             "Employee Name",
             "Active",
-            "Country"
+            "Country",
+            "Area"
         ]]);
     }
+
+    // Hojas creadas con versiones anteriores no tienen la
+    // columna Area. Se agrega sin tocar los datos.
+    if (employees.getMaxColumns() < 5) {
+        employees.insertColumnsAfter(
+            employees.getMaxColumns(),
+            5 - employees.getMaxColumns()
+        );
+    }
+
+    if (!employees.getRange("E1").getValue()) {
+        employees.getRange("E1").setValue("Area");
+    }
+
+    // Area: lista tomada de Config!C2:C50. Solo se usa en el
+    // correo. La validacion solo advierte, no bloquea.
+    employees.getRange("E2:E1000").setDataValidation(
+        SpreadsheetApp.newDataValidation()
+            .requireValueInRange(
+                config.getRange("C2:C50"),
+                true
+            )
+            .setAllowInvalid(true)
+            .build()
+    );
 
     // Hojas creadas con versiones anteriores no tienen la
     // columna Country. Se agrega sin tocar los datos.
@@ -453,11 +504,13 @@ function setupAttendanceTracker() {
 
     config.setColumnWidth(1, 200);
     config.setColumnWidth(2, 350);
+    config.setColumnWidth(3, 200);
 
     employees.setColumnWidth(1, 270);
     employees.setColumnWidth(2, 300);
     employees.setColumnWidth(3, 110);
     employees.setColumnWidth(4, 110);
+    employees.setColumnWidth(5, 200);
 
     report.setColumnWidth(1, 120);
     report.setColumnWidth(2, 270);
@@ -1244,11 +1297,13 @@ function runAttendanceInternal_(mode) {
     }
 
     if (employeeSheet.getLastRow() > 1) {
+        // Employees!E (Area) es opcional: si la columna aun no
+        // existe, el area queda vacia ("Sin area" en el correo).
         const values = employeeSheet.getRange(
             2,
             1,
             employeeSheet.getLastRow() - 1,
-            4
+            Math.min(5, employeeSheet.getMaxColumns())
         ).getDisplayValues();
 
         for (const [index, row] of values.entries()) {
@@ -1291,7 +1346,8 @@ function runAttendanceInternal_(mode) {
             roster.set(userId, {
                 name: name || userId,
                 active: active,
-                country: country
+                country: country,
+                area: String(row[4] || "").trim()
             });
         }
     }
@@ -1554,7 +1610,18 @@ function runAttendanceInternal_(mode) {
         results,
         cutoff,
         ss.getUrl(),
-        Array.from(holidayInfo.values())
+        Array.from(holidayInfo.values()),
+        // ID -> { area, country } para el correo.
+        new Map(
+            Array.from(roster, ([userId, employee]) => [
+                userId,
+                { area: employee.area, country: employee.country }
+            ])
+        ),
+        // Lista de areas (Config!C2:C50): fija el color de cada una.
+        config.getRange("C2:C50").getDisplayValues()
+            .map(row => String(row[0]).trim())
+            .filter(Boolean)
     );
 
     // El dashboard no debe impedir que la asistencia ya
@@ -2960,13 +3027,26 @@ function sendAttendanceReport_(
     results,
     cutoff,
     spreadsheetUrl,
-    holidayInfo
+    holidayInfo,
+    employeeInfo,
+    areaList
 ) {
     if (recipients.length === 0) {
         return;
     }
 
     holidayInfo = holidayInfo || [];
+    areaList = areaList || [];
+
+    // Area y pais de cada fila por ID de usuario (Employees!E y D).
+    // Sin area asignada: "Sin área".
+    const infoOf = row =>
+        (employeeInfo && employeeInfo.get(row[1])) || {};
+
+    const areaOf = row => infoOf(row).area || "Sin área";
+
+    const countryOf = row =>
+        ATTENDANCE.countries[infoOf(row).country] || "—";
 
     const isLate = row => row[4] > cutoff + ":00";
 
@@ -2978,8 +3058,11 @@ function sendAttendanceReport_(
 
     const onTimeCount = present.length - late.length;
 
-    const vacationCount = results
-        .filter(row => row[3] === "ON VACATION").length;
+    const onVacation = results
+        .filter(row => row[3] === "ON VACATION")
+        .sort((a, b) => String(a[2]).localeCompare(String(b[2])));
+
+    const vacationCount = onVacation.length;
 
     const holidayCount = results
         .filter(row => row[3] === "HOLIDAY").length;
@@ -3025,14 +3108,32 @@ function sendAttendanceReport_(
 
     late.forEach(row =>
         lines.push(
-            "- " + row[2] + " | " + row[4] +
+            "- " + row[2] + " | " + areaOf(row) + " | " + countryOf(row) +
+            " | " + row[4] +
             " (" + formatDelay_(row[4], cutoff) + ")"
         )
     );
 
     lines.push("");
     lines.push("SIN REGISTRO (" + missing.length + ")");
-    missing.forEach(row => lines.push("- " + row[2]));
+    missing.forEach(row =>
+        lines.push(
+            "- " + row[2] + " | " + areaOf(row) +
+            " | " + countryOf(row)
+        )
+    );
+
+    // Solo si hay personas de vacaciones.
+    if (vacationCount > 0) {
+        lines.push("");
+        lines.push("DE VACACIONES (" + vacationCount + ")");
+        onVacation.forEach(row =>
+            lines.push(
+                "- " + row[2] + " | " + areaOf(row) +
+                " | " + countryOf(row)
+            )
+        );
+    }
 
     lines.push("");
     lines.push(spreadsheetUrl);
@@ -3064,8 +3165,9 @@ function sendAttendanceReport_(
             font + 'font-size:14px;color:#111827;' + (extra || "") +
             '">' + content + '</td>';
 
-    const headCell = (label, align) =>
-        '<td align="' + (align || "left") + '" style="padding:8px 14px;' +
+    const headCell = (label, width) =>
+        '<td align="left"' + (width ? ' width="' + width + '"' : '') +
+            ' style="padding:8px 14px;' +
             font + 'font-size:11px;font-weight:bold;color:#6B7280;' +
             'text-transform:uppercase;letter-spacing:0.5px;' +
             'background:#F9FAFB;border-bottom:1px solid #E5E7EB;">' +
@@ -3095,12 +3197,44 @@ function sendAttendanceReport_(
         '<tr><td colspan="' + columns + '" style="padding:14px;' + font +
             'font-size:14px;color:#6B7280;">Ninguno</td></tr>';
 
+    // Etiqueta de color (pastilla).
+    const badge = (text, style) =>
+        '<span style="display:inline-block;padding:3px 10px;' +
+            'border-radius:10px;background:' + style.background +
+            ';color:' + style.text + ';font-size:12px;' +
+            'font-weight:bold;">' + escapeHtml_(text) + '</span>';
+
+    // Cada area toma su color segun su posicion en Config!C.
+    const areaBadge = row => {
+        const area = areaOf(row);
+        const index = areaList.indexOf(area);
+
+        return badge(
+            area,
+            index < 0
+                ? colors.neutralBadge
+                : colors.areaPalette[index % colors.areaPalette.length]
+        );
+    };
+
+    const countryBadge = row =>
+        badge(
+            countryOf(row),
+            colors.countryColors[infoOf(row).country] ||
+                colors.neutralBadge
+        );
+
+    const stripe = index =>
+        '<tr style="background:' +
+            (index % 2 ? "#F9FAFB" : "#FFFFFF") + ';">';
+
     const lateRows = late.length === 0
-        ? emptyRow(3)
+        ? emptyRow(5)
         : late.map((row, index) =>
-                '<tr style="background:' +
-                    (index % 2 ? "#F9FAFB" : "#FFFFFF") + ';">' +
+                stripe(index) +
                     cell(escapeHtml_(row[2])) +
+                    cell(areaBadge(row)) +
+                    cell(countryBadge(row)) +
                     cell(escapeHtml_(row[4]), "color:" + colors.lateText + ";") +
                     cell(
                         '<span style="display:inline-block;padding:2px 10px;' +
@@ -3112,15 +3246,19 @@ function sendAttendanceReport_(
                 '</tr>'
             ).join("");
 
-    const missingRows = missing.length === 0
-        ? emptyRow(1)
-        : missing.map((row, index) =>
-                '<tr style="background:' +
-                    (index % 2 ? "#F9FAFB" : "#FFFFFF") + ';">' +
-                    cell(escapeHtml_(row[2])) +
-                '</tr>'
-            ).join("");
+    const peopleRows = list => list.map((row, index) =>
+        stripe(index) +
+            cell(escapeHtml_(row[2])) +
+            cell(areaBadge(row)) +
+            cell(countryBadge(row)) +
+        '</tr>'
+    ).join("");
 
+    const missingRows = missing.length === 0
+        ? emptyRow(3)
+        : peopleRows(missing);
+
+    const vacationRows = peopleRows(onVacation);
     const generated = Utilities.formatDate(
         new Date(),
         ATTENDANCE.timezone,
@@ -3130,7 +3268,7 @@ function sendAttendanceReport_(
     const html =
         '<div style="background:#F3F4F6;padding:24px 8px;">' +
         '<table role="presentation" align="center" width="100%" ' +
-            'cellpadding="0" cellspacing="0" style="max-width:600px;' +
+            'cellpadding="0" cellspacing="0" style="max-width:680px;' +
             'margin:0 auto;background:#FFFFFF;border-radius:12px;' +
             'overflow:hidden;' + font + '">' +
 
@@ -3182,15 +3320,39 @@ function sendAttendanceReport_(
             section(
                 "Llegaron tarde", late.length,
                 colors.late, colors.lateText,
-                [headCell("Empleado"), headCell("Hora"), headCell("Retraso")],
+                [
+                    headCell("Empleado", "28%"),
+                    headCell("Área", "22%"),
+                    headCell("País", "14%"),
+                    headCell("Hora", "14%"),
+                    headCell("Retraso", "22%")
+                ],
                 lateRows
             ) +
             section(
                 "Sin registro de entrada", missing.length,
                 colors.missing, colors.missingText,
-                [headCell("Empleado")],
+                [
+                    headCell("Empleado", "50%"),
+                    headCell("Área", "30%"),
+                    headCell("País", "20%")
+                ],
                 missingRows
             ) +
+
+            // Vacaciones (solo si hay personas)
+            (vacationCount > 0
+                ? section(
+                    "De vacaciones", vacationCount,
+                    colors.vacation, colors.vacationText,
+                    [
+                        headCell("Empleado", "50%"),
+                        headCell("Área", "30%"),
+                        headCell("País", "20%")
+                    ],
+                    vacationRows
+                )
+                : "") +
 
             // Boton
             '<tr><td align="center" style="padding:28px;">' +
