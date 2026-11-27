@@ -1643,8 +1643,8 @@ function runAttendanceInternal_(mode) {
         config.getRange("C2:C50").getDisplayValues()
             .map(row => String(row[0]).trim())
             .filter(Boolean),
-        // Cumpleanos de hoy (Employees!F).
-        getBirthdays_(employeeSheet, date)
+        // Cumpleanos de hoy (y del fin de semana si es lunes).
+        getBirthdayNotice_(employeeSheet, date)
     );
 
     // El dashboard no debe impedir que la asistencia ya
@@ -2344,8 +2344,8 @@ function postDailyNotice_(
             }
         });
 
-    // Cumpleanos de hoy (Employees!F).
-    const birthdays = getBirthdays_(employeeSheet, date);
+    // Cumpleanos de hoy; los lunes, tambien los del fin de semana.
+    const birthdays = getBirthdayNotice_(employeeSheet, date);
 
     if (
         assignees.length === 0 &&
@@ -2424,11 +2424,17 @@ function postDailyNotice_(
     if (birthdays.length > 0) {
         lines.push("");
         lines.push(
-            "🎂 *Cumpleaños de hoy*   `" + birthdays.length + "`"
+            "🎂 *Cumpleaños " + birthdayTitle_(birthdays) + "*   `" +
+            birthdays.length + "`"
         );
 
         birthdays.forEach(person =>
-            lines.push("🎉 " + safe(person.name))
+            lines.push(
+                "🎉 " + safe(person.name) +
+                (person.label
+                    ? "  —  _cumplió el " + person.label + "_"
+                    : "")
+            )
         );
     }
 
@@ -3050,6 +3056,63 @@ function parseExemptNames_(value) {
 }
 
 
+// YYYY-MM-DD + n dias naturales (n puede ser negativo).
+function addDays_(date, days) {
+    const current = new Date(date + "T12:00:00Z");
+
+    current.setUTCDate(current.getUTCDate() + days);
+
+    return current.toISOString().slice(0, 10);
+}
+
+
+// Cumpleanos que se anuncian en "date": los de ese dia y, si es
+// lunes, tambien los del sabado y domingo anteriores (los avisos
+// diarios no corren en fin de semana). Devuelve
+// [{ userId, name, date, label }] en orden cronologico y luego por
+// nombre. label es "" para los de hoy y, para los del fin de
+// semana, algo como "sábado 10/01".
+function getBirthdayNotice_(employeeSheet, date) {
+    const dates = [date];
+
+    if (new Date(date + "T12:00:00Z").getUTCDay() === 1) {
+        dates.unshift(addDays_(date, -2), addDays_(date, -1));
+    }
+
+    const result = [];
+
+    dates.forEach(day => {
+        const label = day === date
+            ? ""
+            : formatLongDate_(day).split(" ")[0] + " " +
+                day.slice(8) + "/" + day.slice(5, 7);
+
+        getBirthdays_(employeeSheet, day).forEach(person =>
+            result.push({
+                userId: person.userId,
+                name: person.name,
+                date: day,
+                label: label
+            })
+        );
+    });
+
+    return result;
+}
+
+
+// "de hoy", "del fin de semana" o "de hoy y del fin de semana".
+function birthdayTitle_(birthdays) {
+    const hasToday = birthdays.some(person => !person.label);
+    const hasWeekend = birthdays.some(person => person.label);
+
+    if (hasToday && hasWeekend) return "de hoy y del fin de semana";
+    if (hasWeekend) return "del fin de semana";
+
+    return "de hoy";
+}
+
+
 // Empleados activos que cumplen anos en "date" (YYYY-MM-DD).
 // Lee Employees!F (Birthday); solo cuentan el mes y el dia.
 // Quien nacio un 29 de febrero se felicita el 28 de febrero en
@@ -3294,7 +3357,8 @@ function sendAttendanceReport_(
 
             lines.push(
                 "- " + person.name + " | " + areaOf(row) +
-                " | " + countryOf(row)
+                " | " + countryOf(row) +
+                (person.label ? " | " + person.label : "")
             );
         });
     }
@@ -3425,10 +3489,26 @@ function sendAttendanceReport_(
     const vacationRows = peopleRows(onVacation);
 
     // Mismas columnas que las otras listas: area y pais salen de
-    // Employees por ID.
-    const birthdayRows = peopleRows(
-        birthdays.map(person => [date, person.userId, person.name])
-    );
+    // Employees por ID. Si hay cumpleanos del fin de semana
+    // (lunes) se agrega la columna "Día".
+    const birthdayHasWeekend = birthdays.some(person => person.label);
+
+    const birthdayRows = birthdays.map((person, index) => {
+        const row = [date, person.userId, person.name];
+
+        return stripe(index) +
+            cell(escapeHtml_(person.name)) +
+            cell(areaBadge(row)) +
+            cell(countryBadge(row)) +
+            (birthdayHasWeekend
+                ? cell(
+                    escapeHtml_(person.label || "Hoy"),
+                    "color:#4B5563;font-size:13px;white-space:nowrap;"
+                )
+                : "") +
+        '</tr>';
+    }).join("");
+
     const generated = Utilities.formatDate(
         new Date(),
         ATTENDANCE.timezone,
@@ -3527,13 +3607,21 @@ function sendAttendanceReport_(
             // Cumpleanos (solo si hay personas)
             (birthdays.length > 0
                 ? section(
-                    "🎂 Cumpleaños de hoy", birthdays.length,
+                    "🎂 Cumpleaños " + birthdayTitle_(birthdays),
+                    birthdays.length,
                     colors.birthday, colors.birthdayText,
-                    [
-                        headCell("Empleado", "54%"),
-                        headCell("Área", "28%"),
-                        headCell("País", "18%")
-                    ],
+                    birthdayHasWeekend
+                        ? [
+                            headCell("Empleado", "38%"),
+                            headCell("Área", "24%"),
+                            headCell("País", "14%"),
+                            headCell("Día", "24%")
+                        ]
+                        : [
+                            headCell("Empleado", "54%"),
+                            headCell("Área", "28%"),
+                            headCell("País", "18%")
+                        ],
                     birthdayRows
                 )
                 : "") +

@@ -269,7 +269,7 @@ Limitación: cualquier mensaje que empiece con un saludo cuenta como asistencia,
 - Las personas de vacaciones o con festivo no aparecen como "sin registro". Las de vacaciones se listan aparte, en la sección "De vacaciones", que solo aparece si hay alguien. No se muestran sus fechas de regreso.
 - La sección de vacaciones y la de cumpleaños no hacen que se envíe el correo: sigue enviándose solo si hay alguien tarde o sin registro.
 - Los cumpleaños se calculan para la fecha procesada. Si procesas un día pasado con `runAttendanceForDate`, el correo muestra los de esa fecha.
-- Los cumpleaños que caen en sábado o domingo no se anuncian, porque ambas funciones diarias no hacen nada en fin de semana.
+- **Lunes:** además de los cumpleaños del lunes, se incluyen los del sábado y el domingo anteriores. La sección pasa a llamarse "Cumpleaños de hoy y del fin de semana" (o "del fin de semana" si ese lunes nadie cumple) y la tabla agrega la columna "Día" (`Hoy`, `sábado 10/01`, `domingo 11/01`).
 - **Se envía en cada ejecución.** Si corres el mismo día dos veces, llegan dos correos.
 - Un correo mal escrito en `B6` detiene la ejecución antes de escribir datos.
 - La primera vez que corra una ejecución con correos configurados, Google pedirá permiso para enviar correo.
@@ -373,7 +373,7 @@ La función `postDailyNotice` publica un mensaje en el grupo de asistencia con c
 - Quién atiende los mensajes de WhatsApp hoy.
 - Quién está de vacaciones hoy.
 - Quién empezará vacaciones en los próximos 3 días hábiles (lunes a viernes).
-- Quién cumple años hoy (`Employees!F`), en la sección `🎂 Cumpleaños de hoy`.
+- Quién cumple años hoy (`Employees!F`), en la sección `🎂 Cumpleaños de hoy`. Los lunes también aparecen quienes cumplieron años el sábado o el domingo anteriores, con la leyenda `cumplió el sábado 10/01`.
 
 Ejemplo:
 
@@ -395,6 +395,15 @@ Ejemplo:
 🎉 Ana López
 
 ━━━━━━━━━━━━━━━━━━━━
+```
+
+Un lunes con cumpleaños del fin de semana, esa sección queda así:
+
+```
+🎂 *Cumpleaños de hoy y del fin de semana*   `3`
+🎉 Pedro Ruiz  —  _cumplió el sábado 10/01_
+🎉 Laura Gómez  —  _cumplió el domingo 11/01_
+🎉 Ana López
 ```
 
 Es texto con el formato de Chat: lo que va entre `*asteriscos*` sale en negrita, entre `_guiones bajos_` en cursiva y entre acentos graves en monoespacio (los contadores). Cada sección lleva un emoji y solo aparecen las secciones que tienen datos. Los caracteres `* _ ~` `` ` `` `<` y `>` se quitan de los nombres para que no rompan el formato.
