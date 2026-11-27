@@ -17,7 +17,7 @@ Este documento describe la versión **`v10.js`**, la última de la carpeta. Se u
 - Rellena una pestaña por mes con una cuadrícula de empleados por día hábil.
 - Mantiene una pestaña `Dashboard` con porcentajes, tendencias, rankings y filtros por mes, país y empleado.
 - Envía un correo con el resumen, las personas que llegaron tarde y las que no registraron entrada.
-- Publica en el grupo de Chat un aviso diario con quién atiende WhatsApp, quién está de vacaciones, quién lo estará en 3 días hábiles y quién cumple años (sección 15).
+- Publica en el grupo de Chat un aviso diario con quién atiende WhatsApp, quién está de vacaciones, quién lo estará en los próximos 3 días hábiles y quién cumple años (sección 15).
 
 ---
 
@@ -56,7 +56,7 @@ Otros valores que se pueden ajustar:
 | `fillerWords` | Palabras que pueden ir antes del saludo. |
 | `excludedNextWords` | Palabras que anulan el saludo, como "tardes". |
 | `colors` | Colores de estados, encabezados y pestañas mensuales. |
-| `VACATION_NOTICE_DAYS_AHEAD` | Días hábiles de anticipación del aviso de vacaciones (3). Está en la sección `AVISO DE VACACIONES EN GOOGLE CHAT`. |
+| `VACATION_NOTICE_DAYS_AHEAD` | Días hábiles de la ventana de aviso de vacaciones (3). Está en la sección `AVISO DE VACACIONES EN GOOGLE CHAT`. |
 
 La URL del webhook de Chat **no** se escribe en el código. Se guarda como propiedad del script (sección 15).
 
@@ -372,7 +372,7 @@ La función `postDailyNotice` publica un mensaje en el grupo de asistencia con c
 
 - Quién atiende los mensajes de WhatsApp hoy.
 - Quién está de vacaciones hoy.
-- Quién empieza vacaciones dentro de 3 días hábiles (lunes a viernes).
+- Quién empezará vacaciones en los próximos 3 días hábiles (lunes a viernes).
 - Quién cumple años hoy (`Employees!F`), en la sección `🎂 Cumpleaños de hoy`.
 
 Ejemplo:
@@ -389,8 +389,7 @@ Ejemplo:
 ▫️ Ana López  —  _hasta el 14/01/2026_
 
 ⏳ *Próximas vacaciones*   `1`
-_Inician el jueves 8 de enero de 2026_
-▫️ Luis Pérez  —  del 08/01/2026 al 12/01/2026
+▫️ Luis Pérez  —  inicia el _jueves_, del 08/01/2026 al 12/01/2026
 
 🎂 *Cumpleaños de hoy*   `1`
 🎉 Ana López
@@ -405,7 +404,8 @@ Reglas:
 - No hace nada en sábado ni domingo.
 - Si no hay asignación de WhatsApp, vacaciones ni cumpleaños, no se publica nada. Un día con solo cumpleaños sí publica.
 - Solo cuentan las vacaciones `APPROVED` de la pestaña `Vacations`.
-- Una vacación se anuncia una vez. Si empieza en fin de semana, se anuncia como si empezara el lunes. No considera la pestaña `Holidays` al contar los 3 días.
+- **Ventana de aviso.** Una vacación aparece en "Próximas vacaciones" todos los días hábiles desde que faltan 3 días hábiles hasta el día anterior a su inicio. Ejemplo: si alguien empieza el jueves, se anuncia el lunes, martes y miércoles; el jueves ya sale en "De vacaciones hoy". Así una vacación aprobada con poca anticipación también se anuncia. Las ordena por fecha de inicio y cada línea indica el día de la semana en que empieza.
+- Si una vacación empieza en fin de semana, cuenta como si empezara el lunes para decidir cuándo avisarla, pero la línea muestra sus fechas reales. No considera la pestaña `Holidays` al contar los 3 días.
 - El mensaje no empieza con un saludo, para que `runAttendance` no lo confunda con una entrada.
 - Si el envío falla, la ejecución termina con el error en el registro.
 - Para cambiar la anticipación, edita `VACATION_NOTICE_DAYS_AHEAD`.

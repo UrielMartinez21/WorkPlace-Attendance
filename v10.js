@@ -2270,9 +2270,12 @@ function nextWeekday_(date) {
 
 
 // Publica quien atiende WhatsApp en "date", quien esta de
-// vacaciones y quien empieza vacaciones dentro de
-// VACATION_NOTICE_DAYS_AHEAD dias habiles. Las vacaciones solo
-// cuentan en filas APPROVED. Sin nada que avisar, no publica.
+// vacaciones y quien empezara vacaciones dentro de la ventana de
+// aviso: desde manana hasta VACATION_NOTICE_DAYS_AHEAD dias
+// habiles. Una vacacion se avisa todos los dias de la ventana
+// (no solo el ultimo), asi una aprobacion tardia tambien se
+// anuncia. Las vacaciones solo cuentan en filas APPROVED. Sin
+// nada que avisar, no publica.
 // whatsappSheet puede ser null (pestana aun no creada).
 function postDailyNotice_(
     vacationSheet,
@@ -2293,7 +2296,8 @@ function postDailyNotice_(
         "aprobada"
     ]);
 
-    const targetDate = addBusinessDays_(
+    // Ultimo dia de la ventana de aviso.
+    const windowEnd = addBusinessDays_(
         date,
         VACATION_NOTICE_DAYS_AHEAD
     );
@@ -2327,7 +2331,11 @@ function postDailyNotice_(
 
             if (start <= date && date <= end) {
                 today.push({ name: name, end: end });
-            } else if (nextWeekday_(start) === targetDate) {
+            } else if (
+                // Si empieza en fin de semana cuenta como lunes.
+                nextWeekday_(start) > date &&
+                nextWeekday_(start) <= windowEnd
+            ) {
                 upcoming.push({
                     name: name,
                     start: start,
@@ -2352,7 +2360,11 @@ function postDailyNotice_(
     const byName = (a, b) => a.name.localeCompare(b.name);
 
     today.sort(byName);
-    upcoming.sort(byName);
+
+    // Primero las que empiezan antes.
+    upcoming.sort((a, b) =>
+        a.start.localeCompare(b.start) || byName(a, b)
+    );
 
     // Formato de Chat: *negrita*, _cursiva_ y `monoespacio`. El
     // mensaje empieza con un emoji y el titulo, nunca con un
@@ -2396,14 +2408,14 @@ function postDailyNotice_(
         lines.push(
             "⏳ *Próximas vacaciones*   `" + upcoming.length + "`"
         );
-        lines.push(
-            "_Inician el " + formatLongDate_(targetDate) + "_"
-        );
 
+        // "jueves 8 de enero de 2026" -> "jueves"
         upcoming.forEach(item =>
             lines.push(
                 "▫️ " + safe(item.name) +
-                "  —  del " + formatMonthHeader_(item.start) +
+                "  —  inicia el _" +
+                formatLongDate_(item.start).split(" ")[0] + "_, " +
+                "del " + formatMonthHeader_(item.start) +
                 " al " + formatMonthHeader_(item.end)
             )
         );
@@ -3351,7 +3363,7 @@ function sendAttendanceReport_(
 
     // Etiqueta de color (pastilla).
     const badge = (text, style) =>
-        '<span style="display:inline-block;padding:3px 10px;' +
+        '<span style="display:inline-block;white-space:nowrap;padding:3px 10px;' +
             'border-radius:10px;background:' + style.background +
             ';color:' + style.text + ';font-size:12px;' +
             'font-weight:bold;">' + escapeHtml_(text) + '</span>';
@@ -3426,7 +3438,7 @@ function sendAttendanceReport_(
     const html =
         '<div style="background:#F3F4F6;padding:24px 8px;">' +
         '<table role="presentation" align="center" width="100%" ' +
-            'cellpadding="0" cellspacing="0" style="max-width:680px;' +
+            'cellpadding="0" cellspacing="0" style="max-width:820px;' +
             'margin:0 auto;background:#FFFFFF;border-radius:12px;' +
             'overflow:hidden;' + font + '">' +
 
@@ -3479,11 +3491,11 @@ function sendAttendanceReport_(
                 "⏰ Llegaron tarde", late.length,
                 colors.late, colors.lateText,
                 [
-                    headCell("Empleado", "28%"),
-                    headCell("Área", "22%"),
-                    headCell("País", "14%"),
-                    headCell("Hora", "14%"),
-                    headCell("Retraso", "22%")
+                    headCell("Empleado", "34%"),
+                    headCell("Área", "21%"),
+                    headCell("País", "13%"),
+                    headCell("Hora", "12%"),
+                    headCell("Retraso", "20%")
                 ],
                 lateRows
             ) +
@@ -3491,9 +3503,9 @@ function sendAttendanceReport_(
                 "⚠️ Sin registro de entrada", missing.length,
                 colors.missing, colors.missingText,
                 [
-                    headCell("Empleado", "50%"),
-                    headCell("Área", "30%"),
-                    headCell("País", "20%")
+                    headCell("Empleado", "54%"),
+                    headCell("Área", "28%"),
+                    headCell("País", "18%")
                 ],
                 missingRows
             ) +
@@ -3504,9 +3516,9 @@ function sendAttendanceReport_(
                     "🌴 De vacaciones", vacationCount,
                     colors.vacation, colors.vacationText,
                     [
-                        headCell("Empleado", "50%"),
-                        headCell("Área", "30%"),
-                        headCell("País", "20%")
+                        headCell("Empleado", "54%"),
+                        headCell("Área", "28%"),
+                        headCell("País", "18%")
                     ],
                     vacationRows
                 )
@@ -3518,9 +3530,9 @@ function sendAttendanceReport_(
                     "🎂 Cumpleaños de hoy", birthdays.length,
                     colors.birthday, colors.birthdayText,
                     [
-                        headCell("Empleado", "50%"),
-                        headCell("Área", "30%"),
-                        headCell("País", "20%")
+                        headCell("Empleado", "54%"),
+                        headCell("Área", "28%"),
+                        headCell("País", "18%")
                     ],
                     birthdayRows
                 )
