@@ -2318,27 +2318,39 @@ function postDailyNotice_(
     today.sort(byName);
     upcoming.sort(byName);
 
-    // En Chat, *texto* es negrita. El mensaje no empieza con un
-    // saludo para que no se confunda con un registro de entrada.
+    // Formato de Chat: *negrita*, _cursiva_ y `monoespacio`. El
+    // mensaje empieza con un emoji y el titulo, nunca con un
+    // saludo, para que no se confunda con un registro de entrada.
+    const divider = "━━━━━━━━━━━━━━━━━━━━";
+
+    // Quita los caracteres que Chat interpreta como formato o
+    // como enlace/mencion, para que un nombre no rompa el mensaje.
+    const safe = text => String(text).replace(/[*_~`<>]/g, "");
+
     const lines = [
-        "*Avisos del dia - " + formatLongDate_(date) + "*"
+        "📣 *AVISOS DEL DÍA*",
+        "📅 _" + formatLongDate_(date) + "_",
+        divider
     ];
 
     if (assignees.length > 0) {
         lines.push("");
-        lines.push("*Mensajes de WhatsApp hoy*");
+        lines.push("💬 *WhatsApp hoy*");
 
-        assignees.forEach(name => lines.push("• " + name));
+        assignees.forEach(name =>
+            lines.push("👤 " + safe(name))
+        );
     }
 
     if (today.length > 0) {
         lines.push("");
-        lines.push("*De vacaciones hoy*");
+        lines.push("🌴 *De vacaciones hoy*   `" + today.length + "`");
 
         today.forEach(item =>
             lines.push(
-                "• " + item.name +
-                " (hasta el " + formatMonthHeader_(item.end) + ")"
+                "▫️ " + safe(item.name) +
+                "  —  _hasta el " +
+                formatMonthHeader_(item.end) + "_"
             )
         );
     }
@@ -2346,19 +2358,23 @@ function postDailyNotice_(
     if (upcoming.length > 0) {
         lines.push("");
         lines.push(
-            "*Proximas vacaciones (inician el " +
-            formatLongDate_(targetDate) + ")*"
+            "⏳ *Próximas vacaciones*   `" + upcoming.length + "`"
+        );
+        lines.push(
+            "_Inician el " + formatLongDate_(targetDate) + "_"
         );
 
         upcoming.forEach(item =>
             lines.push(
-                "• " + item.name +
-                " (del " + formatMonthHeader_(item.start) +
-                " al " + formatMonthHeader_(item.end) + ")"
+                "▫️ " + safe(item.name) +
+                "  —  del " + formatMonthHeader_(item.start) +
+                " al " + formatMonthHeader_(item.end)
             )
         );
     }
 
+    lines.push("");
+    lines.push(divider);
     postToChatWebhook_(lines.join("\n"));
 
     console.log(

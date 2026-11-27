@@ -373,20 +373,24 @@ La función `postDailyNotice` publica un mensaje en el grupo de asistencia con t
 Ejemplo:
 
 ```
-*Avisos del dia - lunes 5 de enero de 2026*
+📣 *AVISOS DEL DÍA*
+📅 _lunes 5 de enero de 2026_
+━━━━━━━━━━━━━━━━━━━━
 
-*Mensajes de WhatsApp hoy*
-• González Rodríguez Joel
+💬 *WhatsApp hoy*
+👤 González Rodríguez Joel
 
-*De vacaciones hoy*
-• Ana López (hasta el 14/01/2026)
+🌴 *De vacaciones hoy*   `1`
+▫️ Ana López  —  _hasta el 14/01/2026_
 
-*Proximas vacaciones (inician el jueves 8 de enero de 2026)*
-• Luis Pérez (del 08/01/2026 al 12/01/2026)
+⏳ *Próximas vacaciones*   `1`
+_Inician el jueves 8 de enero de 2026_
+▫️ Luis Pérez  —  del 08/01/2026 al 12/01/2026
+
+━━━━━━━━━━━━━━━━━━━━
 ```
 
-Es texto plano con el formato básico de Chat: lo que va entre `*asteriscos*` sale en negrita.
-
+Es texto con el formato de Chat: lo que va entre `*asteriscos*` sale en negrita, entre `_guiones bajos_` en cursiva y entre acentos graves en monoespacio (los contadores). Cada sección lleva un emoji y solo aparecen las secciones que tienen datos. Los caracteres `* _ ~` `` ` `` `<` y `>` se quitan de los nombres para que no rompan el formato.
 Reglas:
 
 - Es independiente de la asistencia: `runDailyAttendance` y `runAttendanceForDate` no publican nada. Tiene su propio activador.
