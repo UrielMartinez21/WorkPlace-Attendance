@@ -167,6 +167,9 @@ const ATTENDANCE = {
         exempt: "#CCFBF1",
         exemptText: "#115E59",
 
+        birthday: "#FFE4E6",
+        birthdayText: "#9F1239",
+
         // Etiquetas de color del correo. Cada area toma un color de
         // areaPalette segun su posicion en Config!C2:C50 (la 7a
         // area repite el primero). El pais usa countryColors.
@@ -285,27 +288,44 @@ function setupAttendanceTracker() {
         employees.getRange("A:A")
             .setNumberFormat("@");
 
-        employees.getRange("A1:E1").setValues([[
+        employees.getRange("A1:F1").setValues([[
             "Google Chat User ID",
             "Employee Name",
             "Active",
             "Country",
-            "Area"
+            "Area",
+            "Birthday"
         ]]);
     }
 
-    // Hojas creadas con versiones anteriores no tienen la
-    // columna Area. Se agrega sin tocar los datos.
-    if (employees.getMaxColumns() < 5) {
+    // Hojas creadas con versiones anteriores no tienen las
+    // columnas Area y Birthday. Se agregan sin tocar los datos.
+    if (employees.getMaxColumns() < 6) {
         employees.insertColumnsAfter(
             employees.getMaxColumns(),
-            5 - employees.getMaxColumns()
+            6 - employees.getMaxColumns()
         );
     }
 
     if (!employees.getRange("E1").getValue()) {
         employees.getRange("E1").setValue("Area");
     }
+
+    if (!employees.getRange("F1").getValue()) {
+        employees.getRange("F1").setValue("Birthday");
+    }
+
+    // Cumpleanos: la validacion de tipo fecha muestra el selector
+    // de calendario al hacer doble clic. Solo cuentan el mes y el
+    // dia; el ano puede ser cualquiera. Solo advierte, no bloquea.
+    employees.getRange("F2:F1000")
+        .setNumberFormat("yyyy-mm-dd")
+        .setDataValidation(
+            SpreadsheetApp.newDataValidation()
+                .requireDate()
+                .setAllowInvalid(true)
+                .build()
+        );
 
     // Area: lista tomada de Config!C2:C50. Solo se usa en el
     // correo. La validacion solo advierte, no bloquea.
@@ -511,6 +531,7 @@ function setupAttendanceTracker() {
     employees.setColumnWidth(3, 110);
     employees.setColumnWidth(4, 110);
     employees.setColumnWidth(5, 200);
+    employees.setColumnWidth(6, 130);
 
     report.setColumnWidth(1, 120);
     report.setColumnWidth(2, 270);
@@ -1621,7 +1642,9 @@ function runAttendanceInternal_(mode) {
         // Lista de areas (Config!C2:C50): fija el color de cada una.
         config.getRange("C2:C50").getDisplayValues()
             .map(row => String(row[0]).trim())
-            .filter(Boolean)
+            .filter(Boolean),
+        // Cumpleanos de hoy (Employees!F).
+        getBirthdays_(employeeSheet, date)
     );
 
     // El dashboard no debe impedir que la asistencia ya
@@ -2052,6 +2075,9 @@ function postDailyNotice() {
     const whatsappSheet = ss.getSheetByName(
         ATTENDANCE.sheets.whatsapp
     );
+    const employeeSheet = ss.getSheetByName(
+        ATTENDANCE.sheets.employees
+    );
 
     if (!vacationSheet) {
         throw new Error(
@@ -2076,7 +2102,12 @@ function postDailyNotice() {
         return;
     }
 
-    postDailyNotice_(vacationSheet, whatsappSheet, today);
+    postDailyNotice_(
+        vacationSheet,
+        whatsappSheet,
+        employeeSheet,
+        today
+    );
 }
 
 
@@ -2246,6 +2277,7 @@ function nextWeekday_(date) {
 function postDailyNotice_(
     vacationSheet,
     whatsappSheet,
+    employeeSheet,
     date
 ) {
     const lastRow = vacationSheet.getLastRow();
@@ -2304,10 +2336,14 @@ function postDailyNotice_(
             }
         });
 
+    // Cumpleanos de hoy (Employees!F).
+    const birthdays = getBirthdays_(employeeSheet, date);
+
     if (
         assignees.length === 0 &&
         today.length === 0 &&
-        upcoming.length === 0
+        upcoming.length === 0 &&
+        birthdays.length === 0
     ) {
         console.log("Daily notice skipped: nothing to report.");
         return;
@@ -2373,6 +2409,17 @@ function postDailyNotice_(
         );
     }
 
+    if (birthdays.length > 0) {
+        lines.push("");
+        lines.push(
+            "🎂 *Cumpleaños de hoy*   `" + birthdays.length + "`"
+        );
+
+        birthdays.forEach(person =>
+            lines.push("🎉 " + safe(person.name))
+        );
+    }
+
     lines.push("");
     lines.push(divider);
     postToChatWebhook_(lines.join("\n"));
@@ -2380,7 +2427,8 @@ function postDailyNotice_(
     console.log(
         "Daily notice posted. WhatsApp: " + assignees.length +
         " | Vacation today: " + today.length +
-        " | Upcoming: " + upcoming.length
+        " | Upcoming: " + upcoming.length +
+        " | Birthdays: " + birthdays.length
     );
 }
 
@@ -2990,6 +3038,78 @@ function parseExemptNames_(value) {
 }
 
 
+// Empleados activos que cumplen anos en "date" (YYYY-MM-DD).
+// Lee Employees!F (Birthday); solo cuentan el mes y el dia.
+// Quien nacio un 29 de febrero se felicita el 28 de febrero en
+// los anos no bisiestos. Una fecha ilegible se omite con una
+// advertencia. Devuelve [{ userId, name }] ordenado por nombre.
+function getBirthdays_(employeeSheet, date) {
+    const birthdays = [];
+
+    if (
+        !employeeSheet ||
+        employeeSheet.getLastRow() < 2 ||
+        employeeSheet.getMaxColumns() < 6
+    ) {
+        return birthdays;
+    }
+
+    const year = Number(date.slice(0, 4));
+
+    const leapYear =
+        year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+
+    const monthDay = date.slice(5);
+
+    employeeSheet
+        .getRange(2, 1, employeeSheet.getLastRow() - 1, 6)
+        .getDisplayValues()
+        .forEach((row, index) => {
+            const userId = String(row[0]).trim();
+            const text = String(row[5]).trim();
+
+            if (!userId || !text) return;
+
+            const activeText = String(row[2]).trim().toUpperCase();
+
+            const active =
+                activeText === "" ||
+                ["TRUE", "YES", "SI", "SÍ", "1"].includes(activeText);
+
+            if (!active) return;
+
+            const birthday = parseAssignmentDate_(text);
+
+            if (!birthday) {
+                console.warn(
+                    "Employees row " + (index + 2) +
+                    ": unreadable Birthday: " + text
+                );
+                return;
+            }
+
+            const birthdayMonthDay = birthday.slice(5);
+
+            const matches =
+                birthdayMonthDay === monthDay ||
+                (
+                    birthdayMonthDay === "02-29" &&
+                    !leapYear &&
+                    monthDay === "02-28"
+                );
+
+            if (matches) {
+                birthdays.push({
+                    userId: userId,
+                    name: String(row[1]).trim() || userId
+                });
+            }
+        });
+
+    return birthdays.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+
 // Texto de retraso: "7 min", "1 h 27 min".
 function formatDelay_(time, cutoff) {
     const t = String(time).split(":").map(Number);
@@ -3045,7 +3165,8 @@ function sendAttendanceReport_(
     spreadsheetUrl,
     holidayInfo,
     employeeInfo,
-    areaList
+    areaList,
+    birthdays
 ) {
     if (recipients.length === 0) {
         return;
@@ -3053,6 +3174,7 @@ function sendAttendanceReport_(
 
     holidayInfo = holidayInfo || [];
     areaList = areaList || [];
+    birthdays = birthdays || [];
 
     // Area y pais de cada fila por ID de usuario (Employees!E y D).
     // Sin area asignada: "Sin área".
@@ -3149,6 +3271,20 @@ function sendAttendanceReport_(
                 " | " + countryOf(row)
             )
         );
+    }
+
+    // Solo si alguien cumple anos hoy.
+    if (birthdays.length > 0) {
+        lines.push("");
+        lines.push("CUMPLEAÑOS (" + birthdays.length + ")");
+        birthdays.forEach(person => {
+            const row = [date, person.userId, person.name];
+
+            lines.push(
+                "- " + person.name + " | " + areaOf(row) +
+                " | " + countryOf(row)
+            );
+        });
     }
 
     lines.push("");
@@ -3275,6 +3411,12 @@ function sendAttendanceReport_(
         : peopleRows(missing);
 
     const vacationRows = peopleRows(onVacation);
+
+    // Mismas columnas que las otras listas: area y pais salen de
+    // Employees por ID.
+    const birthdayRows = peopleRows(
+        birthdays.map(person => [date, person.userId, person.name])
+    );
     const generated = Utilities.formatDate(
         new Date(),
         ATTENDANCE.timezone,
@@ -3293,7 +3435,7 @@ function sendAttendanceReport_(
                 ';padding:26px 28px;">' +
                 '<div style="' + font + 'color:#BFD3F2;font-size:12px;' +
                     'letter-spacing:1px;text-transform:uppercase;">' +
-                    'Reporte de asistencia</div>' +
+                    '📋 Reporte de asistencia</div>' +
                 '<div style="' + font + 'color:#FFFFFF;font-size:22px;' +
                     'font-weight:bold;margin-top:6px;">' +
                     escapeHtml_(longDate) + '</div>' +
@@ -3306,17 +3448,17 @@ function sendAttendanceReport_(
             '<tr><td style="padding:20px 24px 0 24px;">' +
                 '<table role="presentation" width="100%" cellpadding="0" ' +
                     'cellspacing="0"><tr>' +
-                    statCell("A tiempo", onTimeCount,
+                    statCell("✅ A tiempo", onTimeCount,
                         colors.onTime, colors.onTimeText) +
-                    statCell("Tarde", late.length,
+                    statCell("⏰ Tarde", late.length,
                         colors.late, colors.lateText) +
-                    statCell("Vacaciones", vacationCount,
+                    statCell("🌴 Vacaciones", vacationCount,
                         colors.vacation, colors.vacationText) +
                     (holidayCount > 0
-                        ? statCell("Festivo", holidayCount,
+                        ? statCell("🎌 Festivo", holidayCount,
                             colors.holiday, colors.holidayText)
                         : "") +
-                    statCell("Sin registro", missing.length,
+                    statCell("⚠️ Sin registro", missing.length,
                         colors.missing, colors.missingText) +
                 '</tr></table>' +
             '</td></tr>' +
@@ -3327,14 +3469,14 @@ function sendAttendanceReport_(
                     'font-size:13px;color:' + colors.holidayText + ';">' +
                     '<span style="display:inline-block;padding:6px 12px;' +
                     'border-radius:8px;background:' + colors.holiday + ';">' +
-                    'Festivo &mdash; ' +
+                    '🎌 Festivo &mdash; ' +
                     escapeHtml_(holidayLabels.join("; ")) +
                     '</span></td></tr>'
                 : "") +
 
             // Listas
             section(
-                "Llegaron tarde", late.length,
+                "⏰ Llegaron tarde", late.length,
                 colors.late, colors.lateText,
                 [
                     headCell("Empleado", "28%"),
@@ -3346,7 +3488,7 @@ function sendAttendanceReport_(
                 lateRows
             ) +
             section(
-                "Sin registro de entrada", missing.length,
+                "⚠️ Sin registro de entrada", missing.length,
                 colors.missing, colors.missingText,
                 [
                     headCell("Empleado", "50%"),
@@ -3359,7 +3501,7 @@ function sendAttendanceReport_(
             // Vacaciones (solo si hay personas)
             (vacationCount > 0
                 ? section(
-                    "De vacaciones", vacationCount,
+                    "🌴 De vacaciones", vacationCount,
                     colors.vacation, colors.vacationText,
                     [
                         headCell("Empleado", "50%"),
@@ -3370,6 +3512,20 @@ function sendAttendanceReport_(
                 )
                 : "") +
 
+            // Cumpleanos (solo si hay personas)
+            (birthdays.length > 0
+                ? section(
+                    "🎂 Cumpleaños de hoy", birthdays.length,
+                    colors.birthday, colors.birthdayText,
+                    [
+                        headCell("Empleado", "50%"),
+                        headCell("Área", "30%"),
+                        headCell("País", "20%")
+                    ],
+                    birthdayRows
+                )
+                : "") +
+
             // Boton
             '<tr><td align="center" style="padding:28px;">' +
                 '<a href="' + escapeHtml_(spreadsheetUrl) + '" ' +
@@ -3377,7 +3533,7 @@ function sendAttendanceReport_(
                     'background:' + colors.header + ';color:#FFFFFF;' +
                     'text-decoration:none;border-radius:8px;' + font +
                     'font-size:14px;font-weight:bold;">' +
-                    'Abrir hoja de asistencia</a>' +
+                    '📊 Abrir hoja de asistencia</a>' +
             '</td></tr>' +
 
             // Pie
